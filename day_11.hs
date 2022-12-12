@@ -1,7 +1,3 @@
-{-# OPTIONS_GHC -Wno-incomplete-patterns #-}
-{-# LANGUAGE DeriveGeneric #-}
-{-# LANGUAGE DeriveAnyClass #-}
-
 module Main where
 
 import System.IO ( openFile, hGetContents, IOMode(ReadMode) )
