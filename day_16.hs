@@ -4,7 +4,7 @@
 module Main where
 
 import System.IO ( openFile, hGetContents, IOMode(ReadMode) )
-import Data.List (sort, group, groupBy, sortBy, find)
+import Data.List (sort, group, groupBy, sortBy, find, subsequences)
 import Debug.Trace
 import Data.Map (Map)
 import Data.Set (Set)
@@ -22,6 +22,7 @@ data Valve = Valve {
     openedAtMinute :: Int
 } deriving(Show, Read)
 
+-- BEGIN HOLY DIJKTRA SECTION --
 getAdjacentPoints :: ValveName -> [Valve] -> [ValveName]
 getAdjacentPoints currentValveName valves = do
     let currentValve = find (\Valve{name} -> name == currentValveName) valves
@@ -59,16 +60,18 @@ dijkstra name valves distances unvisited = do
     let newUnvisited = Set.delete name unvisited
     if null newUnvisited then nD4 else dijkstra (fst $ head nD4) valves nD4 newUnvisited
 
-createDistances :: [Valve] -> [Valve] -> [(ValveName, ValveName, Int)]
-createDistances [] values = []
-createDistances (Valve{name}:vs) valves = do 
+createDistances :: Int -> [Valve] -> [Valve] -> [(ValveName, ValveName, Int)]
+createDistances maxMin [] values = []
+createDistances maxMin (Valve{name}:vs) valves = do 
     let valvesNames = Set.fromList $ map (\Valve{name} -> name) valves
     let valuableValvesNames = Set.fromList $ map (\Valve{name} -> name) $ filter (\Valve{name, flow} -> flow > 0 || name == "AA") valves
     let curDijk = dijkstra name valves (initTentativeDistance name valves) valvesNames
     let pairs = map (\(to, val) -> (name, to, val)) curDijk
-    let filteredPairs = filter (\(from, to, x) -> x > 0 && x < 30 && from `elem` valuableValvesNames && to `elem` valuableValvesNames) pairs
-    filteredPairs ++ createDistances vs valves
+    let filteredPairs = filter (\(from, to, x) -> x > 0 && x < maxMin && from `elem` valuableValvesNames && to `elem` valuableValvesNames) pairs
+    filteredPairs ++ createDistances maxMin vs valves
+-- END HOLY DIJKTRA SECTION --
 
+-- BEGIN PARSING SECTION --
 wordsWhen :: (Char -> Bool) -> String -> [String]
 wordsWhen p s =  case dropWhile p s of
     "" -> []
@@ -84,11 +87,12 @@ parseValve s = do
     let flow = read (drop 5 (init (ws !! 4))) :: Int
     let tunnels = map (\(x:y:rest) -> [x,y]) (drop 9 ws)
     Valve{..}
+-- END PARSING SECTION --
 
-computePression :: [Valve] -> Int
-computePression [] = 0
-computePression (Valve _ _ flow _ openedAtMinute:rest) = value + computePression rest where
-    value = if openedAtMinute > 0 && openedAtMinute < 30 then (30-openedAtMinute)*flow else 0
+computePression :: Int -> [Valve] -> Int
+computePression maxMin [] = 0
+computePression maxMin (Valve _ _ flow _ openedAtMinute:rest) = value + computePression maxMin rest where
+    value = if openedAtMinute > 0 && openedAtMinute < maxMin then (maxMin-openedAtMinute)*flow else 0
 
 openValve :: String -> Int -> [Valve] -> [Valve]
 openValve curName t valves = map (\Valve{..} -> Valve{name, isOpen=if curName == name then True else isOpen, flow, tunnels, openedAtMinute=if curName == name then t else openedAtMinute}) valves
@@ -96,23 +100,37 @@ openValve curName t valves = map (\Valve{..} -> Valve{name, isOpen=if curName ==
 areStillToOpen :: [Valve] -> Bool
 areStillToOpen v = length (filter (\Valve{..} -> not isOpen && flow > 0) v) > 0
 
-findMaxPressure :: (ValveName, Minute, [Valve]) -> [(ValveName, ValveName, Int)] -> Int
-findMaxPressure (currentValveName, n, valves) valuableDists
-    | n >= 30 = computePression valves
+findMaxPressure :: Int -> [ValveName] -> (ValveName, Minute, [Valve]) -> [(ValveName, ValveName, Int)] -> Int
+findMaxPressure maxMin allowedValvesNames (currentValveName, n, valves) valuableDists
+    | n >= maxMin = computePression maxMin valves
     | otherwise = if not (areStillToOpen valves) then currentPressure else maximum([currentPressure] ++ childPressures) where
-        currentPressure = computePression valves
-        closedValves = map (\Valve{name} -> name) $ filter (\Valve{..} -> not isOpen && flow > 0) valves
+        currentPressure = computePression maxMin valves
+        closedValves = map (\Valve{name} -> name) $ filter (\Valve{..} -> not isOpen && flow > 0 && name `elem` allowedValvesNames) valves
         currentValve = find (\Valve{name} -> name == currentValveName) valves
         potentialChildsDists = filter (\(from, to, val) -> from == currentValveName && to `elem` closedValves && to /= "AA") valuableDists
-        childPressures = map (\(from, to, val) -> findMaxPressure (to, n + val + 1, (openValve to (n + val + 1) valves)) valuableDists) potentialChildsDists
+        childPressures = map (\(from, to, val) -> findMaxPressure maxMin allowedValvesNames (to, n + val + 1, (openValve to (n + val + 1) valves)) valuableDists) potentialChildsDists
+
+maxMinP1 = 30
+maxMinP2 = 26
+
+combinations k ns = filter ((k==).length) $ subsequences ns
 
 main :: IO()
 main = do 
     handle <- openFile "day_16.txt" ReadMode 
     content <- hGetContents handle
+
     let lines = wordsWhen (=='\n') content
     let valves = map parseValve lines
     let valvesNames = Set.fromList $ map (\Valve{name} -> name) valves
-    let valuableDists = createDistances valves valves
-    print(findMaxPressure ("AA", 0, valves) valuableDists)
-    -- 1991
+    let valuableDistsP1 = createDistances maxMinP1 valves valves
+    let allowedValvesP1 = map (\Valve{name} -> name) $ filter (\Valve{flow} -> flow > 0) valves
+    --print(findMaxPressure maxMinP1 allowedValvesP1 ("AA", 0, valves) valuableDistsP1)
+
+    let valuableDistsP2 = createDistances maxMinP2 valves valves
+    let couplesP2 = map (\l -> (l,filter (\i -> not (i `elem` l)) allowedValvesP1)) $ combinations ((length allowedValvesP1 `div` 2)-2) allowedValvesP1
+    print(length couplesP2)
+    let maxPressures = map (\(l1,l2) -> (findMaxPressure maxMinP2 l1 ("AA", 0, valves) valuableDistsP2) + (findMaxPressure maxMinP2 l2 ("AA", 0, valves) valuableDistsP2)) couplesP2
+    print(maxPressures)
+    print(maximum maxPressures)
+    -- 2649 & 2700 too low
